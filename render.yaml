@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: hello-dalat-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RENDER_URL
+        sync: false
