@@ -2,6 +2,9 @@ import os
 import asyncio
 import anthropic
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 from dotenv import load_dotenv
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -102,7 +105,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     content = message.text
     lead_counter += 1
     lead_id = f"L{lead_counter:03d}"
-    now = datetime.now()
+    now = datetime.now(VN_TZ)
     source = "forward" if message.forward_origin else "manual"
 
     job = context.job_queue.run_once(
