@@ -138,24 +138,41 @@ async def send_followup_reminder(context: ContextTypes.DEFAULT_TYPE):
 
     lead = leads[lead_id]
     content_preview = lead["content"][:80] + "..." if len(lead["content"]) > 80 else lead["content"]
-    time_str = lead["time"].strftime("%H:%M")
+    time_str = lead["time"].strftime("%H:%M %d/%m")
+
+    # Soạn tin follow-up trước
+    try:
+        followup_text = generate_followup(lead["content"])
+    except Exception:
+        followup_text = None
 
     keyboard = [
         [
-            InlineKeyboardButton("✍️ Soạn tin follow-up", callback_data=f"compose_{lead_id}"),
+            InlineKeyboardButton("🔄 Soạn lại", callback_data=f"compose_{lead_id}"),
             InlineKeyboardButton("⏭️ Bỏ qua", callback_data=f"skip_{lead_id}"),
         ],
         [InlineKeyboardButton("✅ Đã chốt rồi", callback_data=f"close_{lead_id}")],
     ]
 
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=(
-            f"🔔 *Nhắc follow-up*\n\n"
+    if followup_text:
+        text = (
+            f"🔔 *Nhắc follow-up — {lead_id}*\n\n"
             f"📩 Khách nhắn lúc *{time_str}*:\n"
             f"_{content_preview}_\n\n"
-            f"Chưa thấy chốt — bạn muốn làm gì?"
-        ),
+            f"✍️ *Tin gợi ý — copy & gửi luôn:*\n"
+            f"```\n{followup_text}\n```"
+        )
+    else:
+        text = (
+            f"🔔 *Nhắc follow-up — {lead_id}*\n\n"
+            f"📩 Khách nhắn lúc *{time_str}*:\n"
+            f"_{content_preview}_\n\n"
+            f"⚠️ Không soạn được tin tự động. Bấm *Soạn lại* để thử."
+        )
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
