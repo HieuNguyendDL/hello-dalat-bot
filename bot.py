@@ -3,8 +3,6 @@ import asyncio
 import anthropic
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-
-VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 from dotenv import load_dotenv
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -14,6 +12,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    ConversationHandler,
     filters,
 )
 
@@ -22,7 +21,10 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 RENDER_URL = os.getenv("RENDER_URL")
-FOLLOW_UP_DELAY_HOURS = 2
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+# Conversation states
+WAITING_TIME = 1
 
 flask_app = Flask(__name__)
 leads = {}
@@ -30,6 +32,9 @@ lead_counter = 0
 application = None
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
+
+# Lưu tạm tin nhắn đang chờ set giờ: { chat_id: content }
+pending_content = {}
 
 anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -67,6 +72,62 @@ def generate_followup(lead_content: str) -> str:
     )
     return response.content[0].text
 
+def parse_datetime(text: str) -> datetime | None:
+    """
+    Nhận diện các định dạng:
+    - "14:00 ngày 2/4"
+    - "2/4 14:00"
+    - "14h ngày 2/4"
+    - "2/4 14h"
+    - "14:00" hoặc "14h" (hôm nay)
+    - "ngày mai 9h"
+    - "sáng mai 9h", "chiều mai 14h", "tối mai 20h"
+    """
+    import re
+    now = datetime.now(VN_TZ)
+    text = text.strip().lower()
+
+    # Chuẩn hóa: "14h" → "14:00", "9h30" → "9:30"
+    text = re.sub(r'(\d+)h(\d+)', r'\1:\2', text)
+    text = re.sub(r'(\d+)h\b', r'\1:00', text)
+
+    # Lấy giờ:phút
+    time_match = re.search(r'(\d{1,2}):(\d{2})', text)
+    hour = int(time_match.group(1)) if time_match else None
+    minute = int(time_match.group(2)) if time_match else 0
+
+    # Lấy ngày/tháng
+    date_match = re.search(r'(\d{1,2})/(\d{1,2})', text)
+
+    # Xác định ngày
+    if date_match:
+        day = int(date_match.group(1))
+        month = int(date_match.group(2))
+        year = now.year
+        if month < now.month or (month == now.month and day < now.day):
+            year += 1
+    elif 'ngày mai' in text or 'mai' in text:
+        tomorrow = now + timedelta(days=1)
+        day, month, year = tomorrow.day, tomorrow.month, tomorrow.year
+        # Gợi ý giờ theo buổi nếu không có giờ cụ thể
+        if hour is None:
+            if 'sáng' in text: hour, minute = 9, 0
+            elif 'chiều' in text: hour, minute = 14, 0
+            elif 'tối' in text: hour, minute = 20, 0
+    else:
+        day, month, year = now.day, now.month, now.year
+
+    if hour is None:
+        return None
+
+    try:
+        dt = datetime(year, month, day, hour, minute, tzinfo=VN_TZ)
+        if dt <= now:
+            return None
+        return dt
+    except ValueError:
+        return None
+
 async def send_followup_reminder(context: ContextTypes.DEFAULT_TYPE):
     job_data = context.job.data
     lead_id = job_data["lead_id"]
@@ -89,41 +150,99 @@ async def send_followup_reminder(context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text=(f"🔔 *Nhắc follow-up*\n\n📩 Khách nhắn lúc *{time_str}*:\n_{content_preview}_\n\nChưa thấy chốt — bạn muốn làm gì?"),
+        text=(
+            f"🔔 *Nhắc follow-up*\n\n"
+            f"📩 Khách nhắn lúc *{time_str}*:\n"
+            f"_{content_preview}_\n\n"
+            f"Chưa thấy chốt — bạn muốn làm gì?"
+        ),
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ─── CONVERSATION HANDLER: nhận tin → hỏi giờ ───────────────────────────────
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    message = update.message
+    if not message or not message.text:
+        return ConversationHandler.END
+
+    content = message.text
+    chat_id = message.chat_id
+    pending_content[chat_id] = content
+
+    await message.reply_text(
+        f"📩 Đã nhận:\n_{content}_\n\n"
+        f"⏰ Nhắc lúc mấy giờ, ngày nào?\n\n"
+        f"Ví dụ:\n"
+        f"• `14:00 ngày 2/4`\n"
+        f"• `ngày mai 9h`\n"
+        f"• `chiều mai 14h`\n"
+        f"• `20:00` (hôm nay)",
+        parse_mode="Markdown",
+    )
+    return WAITING_TIME
+
+async def handle_time_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     global lead_counter
 
     message = update.message
-    if not message or not message.text:
-        return
-
     chat_id = message.chat_id
-    content = message.text
+    text = message.text
+
+    remind_dt = parse_datetime(text)
+
+    if not remind_dt:
+        await message.reply_text(
+            "❌ Không nhận ra định dạng giờ. Thử lại:\n"
+            "• `14:00 ngày 2/4`\n"
+            "• `ngày mai 9h`\n"
+            "• `20:00` (hôm nay)",
+            parse_mode="Markdown",
+        )
+        return WAITING_TIME
+
+    content = pending_content.get(chat_id, "")
     lead_counter += 1
     lead_id = f"L{lead_counter:03d}"
     now = datetime.now(VN_TZ)
-    source = "forward" if message.forward_origin else "manual"
+    delay = remind_dt - now
 
     job = context.job_queue.run_once(
         send_followup_reminder,
-        when=timedelta(hours=FOLLOW_UP_DELAY_HOURS),
+        when=delay,
         data={"lead_id": lead_id, "chat_id": chat_id},
         name=lead_id,
     )
 
-    leads[lead_id] = {"content": content, "time": now, "status": "pending", "job": job, "chat_id": chat_id}
+    leads[lead_id] = {
+        "content": content,
+        "time": now,
+        "remind_at": remind_dt,
+        "status": "pending",
+        "job": job,
+        "chat_id": chat_id,
+    }
 
-    source_label = "📨 Forward từ khách" if source == "forward" else "📝 Ghi chú thủ công"
-    remind_time = (now + timedelta(hours=FOLLOW_UP_DELAY_HOURS)).strftime("%H:%M")
+    del pending_content[chat_id]
+
+    remind_str = remind_dt.strftime("%H:%M — %d/%m/%Y")
 
     await message.reply_text(
-        f"✅ *Lead {lead_id} đã lưu*\n{source_label}\n⏰ Sẽ nhắc follow-up lúc *{remind_time}*\n\nNếu khách chốt trước, gõ `/close {lead_id}` để tắt nhắc.",
+        f"✅ *Lead {lead_id} đã lưu*\n"
+        f"⏰ Sẽ nhắc lúc *{remind_str}*\n\n"
+        f"Nếu khách chốt trước, gõ `/close {lead_id}` để tắt nhắc.",
         parse_mode="Markdown",
     )
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    chat_id = update.message.chat_id
+    pending_content.pop(chat_id, None)
+    await update.message.reply_text("❌ Đã huỷ.")
+    return ConversationHandler.END
+
+# ─── CALLBACK ────────────────────────────────────────────────────────────────
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -142,7 +261,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             followup_text = generate_followup(lead["content"])
             await query.edit_message_text(
-                f"✍️ *Tin follow-up gợi ý — {lead_id}:*\n\n```\n{followup_text}\n```\n\n👆 Copy đoạn trên và gửi cho khách trên Messenger/Zalo.",
+                f"✍️ *Tin follow-up gợi ý — {lead_id}:*\n\n```\n{followup_text}\n```\n\n👆 Copy và gửi cho khách trên Messenger/Zalo.",
                 parse_mode="Markdown",
             )
         except Exception as e:
@@ -156,6 +275,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if job:
             job.schedule_removal()
         await query.edit_message_text(f"✅ *{lead_id}* — Đã chốt. Không nhắc nữa.", parse_mode="Markdown")
+
+# ─── LỆNH ────────────────────────────────────────────────────────────────────
 
 async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -178,15 +299,29 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = ["📋 *Danh sách lead:*\n"]
     for lid, lead in leads.items():
         icon = {"pending": "⏳", "closed": "✅", "skipped": "⏭️"}.get(lead["status"], "❓")
-        preview = lead["content"][:50] + "..." if len(lead["content"]) > 50 else lead["content"]
-        lines.append(f"{icon} *{lid}* ({lead['time'].strftime('%H:%M')}): {preview}")
+        preview = lead["content"][:40] + "..." if len(lead["content"]) > 40 else lead["content"]
+        remind_str = lead["remind_at"].strftime("%H:%M %d/%m") if "remind_at" in lead else "?"
+        lines.append(f"{icon} *{lid}* (nhắc {remind_str}): {preview}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 *Hello Dalat Lead Recovery Bot*\n\nCách dùng:\n• *Forward* tin nhắn khách vào đây\n• Hoặc *gõ tóm tắt* nội dung khách hỏi\n• Bot sẽ nhắc follow-up sau 2 tiếng nếu chưa chốt\n\nLệnh:\n/list — Xem danh sách lead\n/close L001 — Đánh dấu đã chốt",
+        "👋 *Hello Dalat Lead Recovery Bot*\n\n"
+        "Cách dùng:\n"
+        "• *Forward* hoặc *gõ tóm tắt* tin nhắn khách\n"
+        "• Bot hỏi lại giờ nhắc — bạn trả lời tự nhiên\n\n"
+        "Ví dụ giờ nhắc:\n"
+        "• `14:00 ngày 2/4`\n"
+        "• `ngày mai 9h`\n"
+        "• `chiều mai 14h`\n\n"
+        "Lệnh:\n"
+        "/list — Xem danh sách lead\n"
+        "/close L001 — Đánh dấu đã chốt\n"
+        "/cancel — Huỷ thao tác hiện tại",
         parse_mode="Markdown",
     )
+
+# ─── FLASK ───────────────────────────────────────────────────────────────────
 
 @flask_app.route("/")
 def index():
@@ -202,11 +337,22 @@ async def process_update(data: dict):
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
 
+# ─── SETUP ───────────────────────────────────────────────────────────────────
+
 async def setup():
     global application
 
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)],
+        states={
+            WAITING_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_time_input)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("close", cmd_close))
