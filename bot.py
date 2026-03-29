@@ -103,7 +103,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lead_counter += 1
     lead_id = f"L{lead_counter:03d}"
     now = datetime.now()
-    source = "forward" if message.forward_date else "manual"
+    source = "forward" if message.forward_origin else "manual"
 
     job = context.job_queue.run_once(
         send_followup_reminder,
