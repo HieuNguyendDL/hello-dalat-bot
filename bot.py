@@ -21,10 +21,18 @@ from telegram.ext import (
 
 load_dotenv()
 
-TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-RENDER_URL       = os.environ.get("RENDER_URL", "")
-FIREBASE_DB_URL  = os.environ.get("FIREBASE_DB_URL", "")
+RENDER_URL        = os.environ.get("RENDER_URL", "")
+FIREBASE_DB_URL   = os.environ.get("FIREBASE_DB_URL", "")
+
+print("=== ENV CHECK ===")
+print(f"TELEGRAM_TOKEN     : {'OK' if TELEGRAM_TOKEN else 'MISSING'}")
+print(f"ANTHROPIC_API_KEY  : {'OK' if ANTHROPIC_API_KEY else 'MISSING'}")
+print(f"RENDER_URL         : {RENDER_URL or 'MISSING'}")
+print(f"FIREBASE_DB_URL    : {FIREBASE_DB_URL or 'MISSING'}")
+print(f"FIREBASE_CRED_PATH : {os.environ.get('FIREBASE_CRED_PATH', 'not set')}")
+print("=================")
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -34,11 +42,15 @@ if not firebase_admin._apps:
         firebase_key_path = "/etc/secrets/firebase-adminsdk.json"
         if not os.path.exists(firebase_key_path):
             firebase_key_path = os.environ.get("FIREBASE_CRED_PATH", "firebase-adminsdk.json")
+        print(f"Firebase key path  : {firebase_key_path}")
+        print(f"Firebase key exists: {os.path.exists(firebase_key_path)}")
         cred = credentials.Certificate(firebase_key_path)
         firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DB_URL})
         print("✅ Firebase RTDB kết nối thành công!")
     except Exception as e:
         print(f"⚠️ Lỗi kết nối Firebase: {e}")
+        import traceback
+        traceback.print_exc()
 
 # ── Lead Recovery state ───────────────────────────────────────────────────────
 WAITING_TIME = 1
@@ -333,4 +345,9 @@ def main():
     )
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print(f"❌ Bot crash: {e}")
+        traceback.print_exc()
