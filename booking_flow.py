@@ -672,6 +672,29 @@ async def booking_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # ─── HANDLERS để import vào bot.py ───────────────────────────────────────────
 
+# ─── CÁC HÀM CHẶN TEXT KHI ĐANG CHỜ BẤM NÚT ──────────────────────────────────
+async def adm_wrong_room(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("⚠️ Vui lòng bấm vào nút chọn phòng ở trên, hoặc gõ /cancel để huỷ.")
+    return ADM_ROOM
+
+async def adm_wrong_source(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("⚠️ Vui lòng bấm chọn nguồn booking ở menu trên.")
+    return ADM_SOURCE
+
+async def adm_wrong_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("⚠️ Vui lòng bấm Xác nhận hoặc Huỷ ở menu trên.")
+    return ADM_CONFIRM
+
+async def gst_wrong_room(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("⚠️ Please click a room button above, or type /cancel.")
+    return GST_ROOM_TYPE
+
+async def gst_wrong_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("⚠️ Please click Confirm or Cancel above.")
+    return GST_CONFIRM
+
+# ─── HANDLERS để import vào bot.py ───────────────────────────────────────────
+
 def get_admin_booking_handler() -> ConversationHandler:
     """ConversationHandler cho luồng admin — thêm vào application."""
     return ConversationHandler(
@@ -680,10 +703,19 @@ def get_admin_booking_handler() -> ConversationHandler:
             ADM_NAME:    [MessageHandler(filters.TEXT & ~filters.COMMAND, adm_get_name)],
             ADM_CHECKIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, adm_get_checkin)],
             ADM_CHECKOUT:[MessageHandler(filters.TEXT & ~filters.COMMAND, adm_get_checkout)],
-            ADM_ROOM:    [CallbackQueryHandler(adm_get_room,   pattern=r"^adm_room_")],
+            ADM_ROOM:    [
+                CallbackQueryHandler(adm_get_room, pattern=r"^adm_room_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, adm_wrong_room) # Bẫy chặn text
+            ],
             ADM_GUESTS:  [MessageHandler(filters.TEXT & ~filters.COMMAND, adm_get_guests)],
-            ADM_SOURCE:  [CallbackQueryHandler(adm_get_source, pattern=r"^adm_src_")],
-            ADM_CONFIRM: [CallbackQueryHandler(adm_confirm,    pattern=r"^adm_confirm_")],
+            ADM_SOURCE:  [
+                CallbackQueryHandler(adm_get_source, pattern=r"^adm_src_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, adm_wrong_source) # Bẫy chặn text
+            ],
+            ADM_CONFIRM: [
+                CallbackQueryHandler(adm_confirm, pattern=r"^adm_confirm_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, adm_wrong_confirm) # Bẫy chặn text
+            ],
         },
         fallbacks=[CommandHandler("cancel", booking_cancel)],
         name="admin_booking",
@@ -699,8 +731,14 @@ def get_guest_booking_handler() -> ConversationHandler:
             GST_CHECKIN:  [MessageHandler(filters.TEXT & ~filters.COMMAND, gst_get_checkin)],
             GST_CHECKOUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, gst_get_checkout)],
             GST_GUESTS:   [MessageHandler(filters.TEXT & ~filters.COMMAND, gst_get_guests)],
-            GST_ROOM_TYPE:[CallbackQueryHandler(gst_get_room,    pattern=r"^gst_room_")],
-            GST_CONFIRM:  [CallbackQueryHandler(gst_confirm,     pattern=r"^gst_confirm_")],
+            GST_ROOM_TYPE:[
+                CallbackQueryHandler(gst_get_room, pattern=r"^gst_room_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, gst_wrong_room) # Bẫy chặn text
+            ],
+            GST_CONFIRM:  [
+                CallbackQueryHandler(gst_confirm, pattern=r"^gst_confirm_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, gst_wrong_confirm) # Bẫy chặn text
+            ],
         },
         fallbacks=[CommandHandler("cancel", booking_cancel)],
         name="guest_booking",
