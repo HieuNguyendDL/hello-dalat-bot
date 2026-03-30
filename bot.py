@@ -109,12 +109,13 @@ def parse_datetime(text: str) -> datetime | None:
     except ValueError:
         return None
 
-def restore_leads_from_firebase(application: Application):
+async def restore_leads_from_firebase(application: Application):
     global lead_counter
     try:
         ref  = db.reference("bot_leads")
         data = ref.get()
         if not data:
+            print("ℹ️ Không có lead nào trong Firebase")
             return
 
         now = datetime.now(VN_TZ)
@@ -146,7 +147,9 @@ def restore_leads_from_firebase(application: Application):
 
         print(f"🔄 Khôi phục {restored} lịch nhắc từ Firebase")
     except Exception as e:
+        import traceback
         print(f"⚠️ Lỗi khôi phục lead: {e}")
+        traceback.print_exc()
 
 # ── Reminder callback ─────────────────────────────────────────────────────────
 async def send_followup_reminder(context: ContextTypes.DEFAULT_TYPE):
@@ -316,9 +319,12 @@ async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    restore_leads_from_firebase(application)
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(restore_leads_from_firebase)
+        .build()
+    )
 
     # Lead Recovery conversation
     lead_conv = ConversationHandler(
@@ -345,9 +351,4 @@ def main():
     )
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        import traceback
-        print(f"❌ Bot crash: {e}")
-        traceback.print_exc()
+    main()
