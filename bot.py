@@ -343,26 +343,24 @@ def main():
     # Lấy PORT từ Render (mặc định 8080 nếu không có)
     port = int(os.environ.get("PORT", 8080))
     
-    # Định dạng lại URL webhook chuẩn
-    render_url_clean = RENDER_URL.rstrip('/') # Đảm bảo không có dấu / ở cuối URL
-    webhook_url = f"{render_url_clean}/webhook/{TELEGRAM_TOKEN}"
+    # Định dạng lại URL webhook và đường dẫn nội bộ (url_path)
+    render_url_clean = RENDER_URL.rstrip('/')
+    
+    # Sử dụng chính TOKEN làm đường dẫn bảo mật (Best practice của Telegram)
+    url_path = TELEGRAM_TOKEN
+    webhook_url = f"{render_url_clean}/{url_path}"
 
     print(f"🚀 Đang khởi động Bot...")
+    print(f"🔗 Lắng nghe tại cổng (Port): {port}")
     print(f"🔗 Webhook URL: {webhook_url}")
 
-    # Chạy Webhook nội bộ thay vì dùng Flask
+    # Chạy Webhook với đầy đủ url_path
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
+        url_path=url_path,
         webhook_url=webhook_url
     )
 
 if __name__ == "__main__":
-    # Bắt buộc tạo vòng lặp sự kiện (event loop) cho môi trường Python 3.11+ trên Render
-    import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    # Khởi chạy bot
     main()
-
