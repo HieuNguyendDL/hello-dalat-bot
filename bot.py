@@ -1,63 +1,89 @@
+import sys
 import os
 import re
 import asyncio
-import anthropic
-import firebase_admin
-from firebase_admin import credentials, db
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from dotenv import load_dotenv
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    MessageHandler,
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes,
-    ConversationHandler,
-    filters,
-)
+print(f"Python: {sys.version}", flush=True)
+print("Starting imports...", flush=True)
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    print("✅ dotenv", flush=True)
+except Exception as e:
+    print(f"❌ dotenv: {e}", flush=True)
 
+try:
+    import anthropic
+    print("✅ anthropic", flush=True)
+except Exception as e:
+    print(f"❌ anthropic: {e}", flush=True)
+    sys.exit(1)
+
+try:
+    import firebase_admin
+    from firebase_admin import credentials, db
+    print("✅ firebase_admin", flush=True)
+except Exception as e:
+    print(f"❌ firebase_admin: {e}", flush=True)
+    sys.exit(1)
+
+try:
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import (
+        Application,
+        MessageHandler,
+        CallbackQueryHandler,
+        CommandHandler,
+        ContextTypes,
+        ConversationHandler,
+        filters,
+    )
+    print("✅ python-telegram-bot", flush=True)
+except Exception as e:
+    print(f"❌ python-telegram-bot: {e}", flush=True)
+    sys.exit(1)
+
+# ── Env vars ──────────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 RENDER_URL        = os.environ.get("RENDER_URL", "")
 FIREBASE_DB_URL   = os.environ.get("FIREBASE_DB_URL", "")
 
-print("=== ENV CHECK ===")
-print(f"TELEGRAM_TOKEN     : {'OK' if TELEGRAM_TOKEN else 'MISSING'}")
-print(f"ANTHROPIC_API_KEY  : {'OK' if ANTHROPIC_API_KEY else 'MISSING'}")
-print(f"RENDER_URL         : {RENDER_URL or 'MISSING'}")
-print(f"FIREBASE_DB_URL    : {FIREBASE_DB_URL or 'MISSING'}")
-print(f"FIREBASE_CRED_PATH : {os.environ.get('FIREBASE_CRED_PATH', 'not set')}")
-print("=================")
+print("=== ENV CHECK ===", flush=True)
+print(f"TELEGRAM_TOKEN    : {'OK' if TELEGRAM_TOKEN else 'MISSING'}", flush=True)
+print(f"ANTHROPIC_API_KEY : {'OK' if ANTHROPIC_API_KEY else 'MISSING'}", flush=True)
+print(f"RENDER_URL        : {RENDER_URL or 'MISSING'}", flush=True)
+print(f"FIREBASE_DB_URL   : {FIREBASE_DB_URL or 'MISSING'}", flush=True)
+firebase_cred_path = os.environ.get("FIREBASE_CRED_PATH", "not set")
+print(f"FIREBASE_CRED_PATH: {firebase_cred_path}", flush=True)
+print("=================", flush=True)
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 # ── Firebase RTDB ─────────────────────────────────────────────────────────────
 if not firebase_admin._apps:
     try:
-        firebase_key_path = "/etc/secrets/firebase-adminsdk.json"
-        if not os.path.exists(firebase_key_path):
-            firebase_key_path = os.environ.get("FIREBASE_CRED_PATH", "firebase-adminsdk.json")
-        print(f"Firebase key path  : {firebase_key_path}")
-        print(f"Firebase key exists: {os.path.exists(firebase_key_path)}")
-        cred = credentials.Certificate(firebase_key_path)
+        key_path = "/etc/secrets/firebase-adminsdk.json"
+        if not os.path.exists(key_path):
+            key_path = os.environ.get("FIREBASE_CRED_PATH", "firebase-adminsdk.json")
+        print(f"Firebase key: {key_path} — exists: {os.path.exists(key_path)}", flush=True)
+        cred = credentials.Certificate(key_path)
         firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DB_URL})
-        print("✅ Firebase RTDB kết nối thành công!")
+        print("✅ Firebase RTDB OK", flush=True)
     except Exception as e:
-        print(f"⚠️ Lỗi kết nối Firebase: {e}")
         import traceback
+        print(f"❌ Firebase init: {e}", flush=True)
         traceback.print_exc()
 
 # ── Lead Recovery state ───────────────────────────────────────────────────────
-WAITING_TIME = 1
-leads: dict        = {}
-lead_counter: int  = 0
+WAITING_TIME      = 1
+leads: dict       = {}
+lead_counter: int = 0
 pending_content: dict = {}
-anthropic_client   = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+anthropic_client  = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 HOSTEL_INFO = """
 Bạn là trợ lý của Hello Dalat Hostel — hostel tại Đà Lạt.
@@ -115,7 +141,7 @@ async def restore_leads_from_firebase(application: Application):
         ref  = db.reference("bot_leads")
         data = ref.get()
         if not data:
-            print("ℹ️ Không có lead nào trong Firebase")
+            print("ℹ️ Không có lead nào trong Firebase", flush=True)
             return
 
         now = datetime.now(VN_TZ)
@@ -145,10 +171,10 @@ async def restore_leads_from_firebase(application: Application):
                 leads[lead_id]["job"] = job
                 restored += 1
 
-        print(f"🔄 Khôi phục {restored} lịch nhắc từ Firebase")
+        print(f"🔄 Khôi phục {restored} lịch nhắc từ Firebase", flush=True)
     except Exception as e:
         import traceback
-        print(f"⚠️ Lỗi khôi phục lead: {e}")
+        print(f"⚠️ Lỗi khôi phục lead: {e}", flush=True)
         traceback.print_exc()
 
 # ── Reminder callback ─────────────────────────────────────────────────────────
@@ -164,7 +190,7 @@ async def send_followup_reminder(context: ContextTypes.DEFAULT_TYPE):
     try:
         followup_text = generate_followup(lead["content"])
     except Exception as e:
-        print(f"Lỗi AI: {e}")
+        print(f"Lỗi AI: {e}", flush=True)
         followup_text = "Dạ chào bạn, mình là lễ tân bên Hello Dalat Hostel. Không biết bạn đã chọn được phòng ưng ý chưa ạ? Cần tư vấn thêm cứ nhắn mình nhé!"
 
     kb = [
@@ -228,7 +254,7 @@ async def handle_time_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "chat_id":   chat_id,
         })
     except Exception as e:
-        print(f"Lỗi lưu Firebase: {e}")
+        print(f"Lỗi lưu Firebase: {e}", flush=True)
 
     await update.message.reply_text(
         f"✅ Đã lưu *{lead_id}* — nhắc lúc *{remind_dt.strftime('%H:%M %d/%m')}*",
@@ -258,7 +284,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✍️ *Gợi ý mới:*\n```\n{txt}\n```", parse_mode="Markdown"
             )
         except Exception as e:
-            print(f"Lỗi AI: {e}")
+            print(f"Lỗi AI: {e}", flush=True)
             await query.edit_message_text("❌ AI lỗi, thử lại sau.")
 
     elif action in ("skip", "close"):
@@ -272,7 +298,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             db.reference(f"bot_leads/{lead_id}/status").set(new_status)
         except Exception as e:
-            print(f"Lỗi cập nhật Firebase: {e}")
+            print(f"Lỗi Firebase: {e}", flush=True)
         label = "bỏ qua" if action == "skip" else "chốt"
         await query.edit_message_text(
             f"✅ *{lead_id}* — Đã {label}.", parse_mode="Markdown"
@@ -314,11 +340,12 @@ async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         db.reference(f"bot_leads/{lead_id}/status").set("closed")
     except Exception as e:
-        print(f"Lỗi Firebase: {e}")
+        print(f"Lỗi Firebase: {e}", flush=True)
     await update.message.reply_text(f"✅ *{lead_id}* đã chốt.", parse_mode="Markdown")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
+    print("🚀 Khởi tạo bot...", flush=True)
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -326,7 +353,6 @@ def main():
         .build()
     )
 
-    # Lead Recovery conversation
     lead_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)],
         states={WAITING_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_time_input)]},
@@ -334,15 +360,14 @@ def main():
     )
     application.add_handler(lead_conv)
     application.add_handler(CallbackQueryHandler(handle_callback, pattern="^(compose|skip|close)_"))
-
-    application.add_handler(CommandHandler("start",  cmd_start))
-    application.add_handler(CommandHandler("list",   cmd_list))
-    application.add_handler(CommandHandler("close",  cmd_close))
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("list",  cmd_list))
+    application.add_handler(CommandHandler("close", cmd_close))
 
     port        = int(os.environ.get("PORT", 8080))
     webhook_url = f"{RENDER_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
+    print(f"🌐 Webhook: {webhook_url[:50]}...", flush=True)
 
-    print("🚀 Bot khởi động (Webhook mode)…")
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
