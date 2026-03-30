@@ -28,13 +28,20 @@ VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 # ─── KHỞI TẠO FIREBASE ───────────────────────────────────────────────────────
 if not firebase_admin._apps:
     try:
-        cred = credentials.Certificate('firebase-adminsdk.json')
+        # Render cất Secret File ở đường dẫn /etc/secrets/
+        firebase_key_path = '/etc/secrets/firebase-adminsdk.json'
+        
+        # Nếu không tìm thấy trong két sắt (ví dụ bạn đang chạy thử ở máy tính cá nhân), thì tìm ở thư mục hiện tại
+        if not os.path.exists(firebase_key_path):
+            firebase_key_path = 'firebase-adminsdk.json'
+            
+        cred = credentials.Certificate(firebase_key_path)
         firebase_admin.initialize_app(cred, {
             'databaseURL': FIREBASE_DB_URL
         })
         print("✅ Đã kết nối Firebase thành công!")
     except Exception as e:
-        print(f"⚠️ Lỗi kết nối Firebase (Kiểm tra lại Secret File & DB_URL): {e}")
+        print(f"⚠️ Lỗi kết nối Firebase: {e}")
 
 # Trạng thái Conversation
 WAITING_TIME = 1
