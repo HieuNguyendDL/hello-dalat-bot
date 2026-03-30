@@ -148,8 +148,12 @@ async def send_followup_reminder(context: ContextTypes.DEFAULT_TYPE):
     if lead_id not in leads or leads[lead_id]["status"] != "pending": return
     lead = leads[lead_id]
     
-    try: followup_text = generate_followup(lead["content"])
-    except Exception: followup_text = None
+    try: 
+        followup_text = generate_followup(lead["content"])
+    except Exception as e: 
+        print(f"Lỗi AI: {e}") # In lỗi ra log để sau này bạn dễ theo dõi
+        # Sử dụng mẫu tin dự phòng khi AI hết tiền
+        followup_text = "Dạ chào bạn, mình là lễ tân bên Hello Dalat Hostel. Không biết bạn đã chọn được phòng ưng ý cho chuyến đi sắp tới chưa ạ? Nếu bạn cần tư vấn thêm cứ nhắn lại cho mình nhé!"
 
     kb = [
         [InlineKeyboardButton("🔄 Soạn lại", callback_data=f"compose_{lead_id}"), InlineKeyboardButton("⏭️ Bỏ qua", callback_data=f"skip_{lead_id}")],
@@ -159,10 +163,10 @@ async def send_followup_reminder(context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"🔔 *Nhắc follow-up — {lead_id}*\n\n"
         f"📩 _{lead['content']}_\n\n"
-        f"✍️ *Tin gợi ý:*\n```\n{followup_text}\n```" if followup_text else "⚠️ Lỗi soạn tin AI."
+        f"✍️ *Tin gợi ý:*\n```\n{followup_text}\n```"
     )
     await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
-
+    
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     content = update.message.text
     pending_content[update.message.chat_id] = content
@@ -220,7 +224,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Đang soạn lại...")
         try:
             txt = generate_followup(leads[lead_id]["content"])
-            await query.edit_message_text(f"✍️ *Gợi ý mới:*\n```\n{txt}\n```", parse_mode="Markdown")
+            await query.edit_message_text(f"✍️ *Gợi ý mới do AI soạn:*\n```\n{txt}\n```", parse_mode="Markdown")
+        except Exception as e:
+            print(f"Lỗi AI: {e}")
+            txt = "Dạ chào bạn, mình là lễ tân bên Hello Dalat Hostel. Không biết bạn đã chọn được phòng ưng ý cho chuyến đi sắp tới chưa ạ? Nếu bạn cần tư vấn thêm cứ nhắn lại cho mình nhé!"
+            await query.edit_message_text(f"✍️ *Gợi ý mới (Mẫu dự phòng vì AI hết hạn mức):*\n```\n{txt}\n```", parse_mode="Markdown")
         except Exception: pass
     elif action in ["skip", "close"]:
         leads[lead_id]["status"] = "skipped" if action == "skip" else "closed"
