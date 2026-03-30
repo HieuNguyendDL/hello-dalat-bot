@@ -358,4 +358,11 @@ def main():
     )
 
 if __name__ == "__main__":
+    # Bắt buộc tạo vòng lặp sự kiện (event loop) cho môi trường Python 3.11+ trên Render
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Khởi chạy bot
     main()
+
