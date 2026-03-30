@@ -232,7 +232,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception: pass
     elif action in ["skip", "close"]:
         leads[lead_id]["status"] = "skipped" if action == "skip" else "closed"
-        if leads[lead_id].get("job"): leads[lead_id]["job"].schedule_removal()
+        if leads[lead_id].get("job"):
+            try:
+                leads[lead_id]["job"].schedule_removal()
+            except Exception:
+                pass # Đã chạy xong rồi thì bỏ qua, không cần xóa nữa
         
         # 🔥 CẬP NHẬT TRẠNG THÁI TRÊN FIREBASE
         db.reference(f'bot_leads/{lead_id}/status').set(leads[lead_id]["status"])
@@ -244,7 +248,11 @@ async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lead_id = context.args[0].upper()
     if lead_id in leads:
         leads[lead_id]["status"] = "closed"
-        if leads[lead_id].get("job"): leads[lead_id]["job"].schedule_removal()
+        if leads[lead_id].get("job"):
+            try:
+                leads[lead_id]["job"].schedule_removal()
+            except Exception:
+                pass
         db.reference(f'bot_leads/{lead_id}/status').set("closed")
         await update.message.reply_text(f"✅ *{lead_id}* đã chốt.", parse_mode="Markdown")
 
