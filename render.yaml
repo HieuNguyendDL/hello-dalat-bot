@@ -11,3 +11,7 @@ services:
         sync: false
       - key: RENDER_URL
         sync: false
+      - key: FIREBASE_DB_URL
+        sync: false
+      - key: FIREBASE_CRED_PATH
+        sync: false
